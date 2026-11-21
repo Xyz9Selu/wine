@@ -535,6 +535,24 @@ static void adjust_menu_item_rect( const struct menu *menu, RECT *rect )
     OffsetRect( rect, menu->items_rect.left, menu->items_rect.top - scroll_offset );
 }
 
+/* Like update_invalid_menu_bar_layout, but for callers holding a menu pointer:
+ * computing the layout may send WM_MEASUREITEM to an owner-drawn menu's owner,
+ * which must not happen while the user lock is held. Drops the pointer, lays out
+ * the bar, and returns TRUE if the caller must grab the menu again. */
+static BOOL relayout_menu_bar_unlocked( struct menu *menu )
+{
+    RECT rect = menu->items_rect;
+    HWND hwnd = menu->hWnd;
+    HDC hdc;
+
+    if ((menu->wFlags & MF_POPUP) || menu->Height) return FALSE;
+    release_menu_ptr( menu );
+    hdc = NtUserGetDCEx( hwnd, 0, DCX_CACHE | DCX_WINDOW );
+    NtUserDrawMenuBarTemp( hwnd, hdc, &rect, 0, 0 );
+    NtUserReleaseDC( hwnd, hdc );
+    return TRUE;
+}
+
 /* Recompute the layout of a menu bar if its height has been invalidated */
 static void update_invalid_menu_bar_layout( struct menu *menu, HWND hwnd )
 {
@@ -854,7 +872,9 @@ BOOL WINAPI NtUserGetMenuItemRect( HWND hwnd, HMENU handle, UINT item, RECT *rec
         return FALSE;
     }
 
-    update_invalid_menu_bar_layout( menu, menu->hWnd );
+    if (relayout_menu_bar_unlocked( menu ) &&
+        !(menu = find_menu_item( handle, item, MF_BYPOSITION, &pos )))
+        return FALSE;
 
     *rect = menu->items[pos].rect;
     OffsetRect( rect, menu->items_rect.left, menu->items_rect.top );
@@ -1601,6 +1621,7 @@ INT WINAPI NtUserMenuItemFromPoint( HWND hwnd, HMENU handle, int x, int y )
     UINT pos;
 
     if (!(menu = grab_menu_ptr(handle))) return -1;
+    if (relayout_menu_bar_unlocked( menu ) && !(menu = grab_menu_ptr(handle))) return -1;
     if (find_item_by_coords( menu, pt, &pos ) != ht_item) pos = -1;
     release_menu_ptr(menu);
     return pos;
