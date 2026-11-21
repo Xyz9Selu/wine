@@ -20,6 +20,13 @@ Each commit message has the analysis and the limits of the fix.
     closetest.exe 127.0.0.1 8766 1000 s # same, in the TLS handshake phase
     closetest.exe 127.0.0.1 8765 7000   # close after completion: request must still succeed
 
+## Reproduce the menu assertion
+
+`menutest/menutest.c`: owner-drawn menu bar, one item appended, then `GetMenuItemRect()` before the bar is redrawn.
+
+    i686-w64-mingw32-gcc -o menutest.exe menutest.c -luser32
+    wine menutest.exe    # 11.21/11.22: user_check_not_lock assertion; Windows and this branch: prints the rect
+
 ## Build
 
 `build/Dockerfile` (Ubuntu 24.04 + mingw) and `build/build-in-docker.sh`:
@@ -33,4 +40,4 @@ and copy the two `.dll` files into `out/wine-fixes/lib/wine/{i386,x86_64}-window
 ## Status
 
 - Menu fix: the application starts and stays up (2+ minutes) on the patched build.
-- wininet fix: matches Windows in `closetest`. Not yet confirmed against the real application.
+- wininet fix: matches Windows in `closetest`; the real application logged in 9 times out of 9 (4 through the timeout path), against 5 crashes in 12 logins without it.
