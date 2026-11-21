@@ -352,6 +352,8 @@ typedef struct
 
     data_stream_t *data_stream;
     netconn_stream_t netconn_stream;
+
+    LONG send_in_progress;  /* a synchronous send (create_request) is running on some thread */
 } http_request_t;
 
 typedef struct task_header_t task_header_t;
@@ -380,6 +382,7 @@ HINTERNET FTP_Connect(appinfo_t *hIC, LPCWSTR lpszServerName,
 	LPCWSTR lpszPassword, DWORD dwFlags, DWORD_PTR dwContext,
 	DWORD dwInternalFlags);
 
+void HTTP_abort_request(object_header_t*);
 DWORD HTTP_Connect(appinfo_t*,LPCWSTR,
         INTERNET_PORT nServerPort, LPCWSTR lpszUserName,
         LPCWSTR lpszPassword, DWORD dwFlags, DWORD_PTR dwContext,

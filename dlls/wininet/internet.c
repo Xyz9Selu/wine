@@ -1846,6 +1846,7 @@ BOOL WINAPI InternetCloseHandle(HINTERNET hInternet)
     }
 
     invalidate_handle(obj);
+    if (obj->htype == WH_HHTTPREQ) HTTP_abort_request(obj);
     WININET_Release(obj);
 
     return TRUE;

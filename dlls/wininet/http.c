@@ -5012,6 +5012,26 @@ static void set_content_length_header( http_request_t *request, DWORD len, DWORD
     HTTP_HttpAddRequestHeadersW( request, buf, ~0u, flags );
 }
 
+/* InternetCloseHandle() on a request whose HttpSendRequest() is still running on another thread:
+ * native makes that call fail right away with ERROR_INTERNET_OPERATION_CANCELLED. Shut the socket
+ * down so the blocked send/recv returns; create_request() then reports the cancellation.
+ * Only done while a send is in flight, so idle keep-alive connections stay reusable. */
+void HTTP_abort_request(object_header_t *hdr)
+{
+    http_request_t *req = (http_request_t *)hdr;
+    netconn_t *netconn;
+
+    if (!ReadNoFence(&req->send_in_progress)) return;
+    netconn = req->netconn;
+    if (netconn && netconn->socket != -1)
+    {
+        TRACE("aborting in-flight request %p\n", req);
+        shutdown(netconn->socket, SD_BOTH);
+        /* shutdown() alone does not wake a recv() that is already blocked */
+        CancelIoEx((HANDLE)(ULONG_PTR)netconn->socket, NULL);
+    }
+}
+
 static DWORD create_request(http_request_t *request, void *optional, DWORD optlen, DWORD content_length,
                             BOOL end_request)
 {
@@ -5020,6 +5040,8 @@ static DWORD create_request(http_request_t *request, void *optional, DWORD optle
     INT responseLen, cnt;
     DWORD res;
 
+    InterlockedIncrement(&request->send_in_progress);
+
     do
     {
         DWORD len, data_len = optlen;
@@ -5027,6 +5049,12 @@ static DWORD create_request(http_request_t *request, void *optional, DWORD optle
         char *ascii_req;
 
         loop_next = FALSE;
+
+        if (!request->hdr.valid_handle)
+        {
+            res = ERROR_INTERNET_OPERATION_CANCELLED;
+            break;
+        }
 
         if(redirected) {
             request->contentLength = ~0;
@@ -5058,6 +5086,12 @@ static DWORD create_request(http_request_t *request, void *optional, DWORD optle
         res = open_http_connection(request, &reusing_connection);
         if (res != ERROR_SUCCESS)
             break;
+        if (!request->hdr.valid_handle)
+        {
+            /* closed while we were connecting: the socket was not known to HTTP_abort_request yet */
+            res = ERROR_INTERNET_OPERATION_CANCELLED;
+            break;
+        }
 
         if (!reusing_connection && (request->hdr.dwFlags & INTERNET_FLAG_SECURE))
         {
@@ -5282,6 +5316,8 @@ static DWORD create_request(http_request_t *request, void *optional, DWORD optle
     while (loop_next);
 
 lend:
+    InterlockedDecrement(&request->send_in_progress);
+    if (!request->hdr.valid_handle) res = ERROR_INTERNET_OPERATION_CANCELLED;
     return res;
 }
 
